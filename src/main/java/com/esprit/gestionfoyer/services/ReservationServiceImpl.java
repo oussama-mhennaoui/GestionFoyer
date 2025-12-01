@@ -62,7 +62,7 @@ public class ReservationServiceImpl implements IReservationService {
         reservation.setAnneeUniversitaire(LocalDate.now());
         reservation.setEstValide(true);
         reservation.setChambre(chambre);
-        // 6. Add student to reservation
+        // 6. Add student to reservation .
         reservation.getEtudiants().add(etudiant);
 
         return reservationRepository.save(reservation);
