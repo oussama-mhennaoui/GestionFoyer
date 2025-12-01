@@ -67,7 +67,7 @@ public class ReservationServiceImpl implements IReservationService {
 
         return reservationRepository.save(reservation);
     }
-
+    //comentaire
     private boolean isChambreCapacityAvailable(Chambre chambre) {
         // Count current valid reservations for this chambre
         List<Reservation> reservations = reservationRepository.findByChambreAndEstValideTrue(chambre);
