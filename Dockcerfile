@@ -1,25 +1,12 @@
-# Build stage
-FROM maven:3.8.4-openjdk-11-slim AS build
-WORKDIR /workspace/app
-
-# Copier les fichiers de configuration
-COPY pom.xml .
-COPY src src
-
-# Build l'application
-RUN mvn clean package -DskipTests
-
-# Runtime stage
+# Dockerfile Spring Boot Application
 FROM eclipse-temurin:11-jre
+
 WORKDIR /app
 
-# Créer un utilisateur non-root
-RUN useradd -m -u 1001 springuser
-USER springuser
+# COPIER AVEC CHEMIN RELATIF CORRECT
+# Note: Utilisez COPY avec le chemin depuis le contexte courant
+COPY ./target/GestionFoyer-0.0.1-SNAPSHOT.jar ./app.jar
 
-# Copier le JAR depuis le stage de build
-COPY --from=build /workspace/app/target/*.jar app.jar
-
-# Port et commande
 EXPOSE 8080
+
 ENTRYPOINT ["java", "-jar", "app.jar"]
