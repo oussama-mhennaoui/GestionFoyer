@@ -1,12 +1,17 @@
-FROM maven:3.9.6-eclipse-temurin-17 AS build
-WORKDIR /app
-COPY pom.xml .
-RUN mvn dependency:go-offline -B
-COPY . .
-RUN mvn package -DskipTests
+# Dockerfile pour application Java Spring
+FROM openjdk:11-jre-slim
 
-FROM eclipse-temurin:17-jre
-WORKDIR /app
-COPY --from=build /app/target/*.jar app.jar
+# Variables d'environnement
+ENV SPRING_PROFILES_ACTIVE=prod
+
+# Répertoire de travail
+WORKDIR /src
+
+# Copier le JAR (à adapter selon votre build)
+COPY target/*.jar app.jar
+
+# Port d'exposition
 EXPOSE 8080
+
+# Commande de démarrage
 ENTRYPOINT ["java", "-jar", "app.jar"]
