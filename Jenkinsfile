@@ -2,162 +2,186 @@ pipeline {
     agent any
     
     environment {
-        // Configuration Docker Hub
-        DOCKERHUB_CREDENTIALS_ID = 'docker-hub-credentials'  // ID que vous avez défini
-        DOCKER_IMAGE = 'ouss12045/gestionfoyer'  // Votre image Docker Hub
-        GIT_REPO = 'https://github.com/oussama-mhennaoui/GestionFoyer.git'
-        
-        // Tags Docker
-        BRANCH_NAME = "${env.BRANCH_NAME ?: 'main'}"
-        COMMIT_HASH = ''
+        // Configuration Docker Hub - UTILISEZ LE BON ID
+        DOCKERHUB_CREDENTIALS_ID = 'docker-hub-credentials'
+        DOCKER_IMAGE = 'ouss12045/gestionfoyer'
+        DOCKER_REGISTRY = 'https://index.docker.io/v1/'
     }
     
     stages {
         
-        // Étape 1: Récupération du code
+        // Étape 1: Vérification de l'environnement
+        stage('Vérification Environnement') {
+            steps {
+                script {
+                    echo "📋 Informations de build:"
+                    echo "- Job: ${env.JOB_NAME}"
+                    echo "- Build: ${env.BUILD_NUMBER}"
+                    echo "- Workspace: ${env.WORKSPACE}"
+                    
+                    // Vérifier les outils installés
+                    sh '''
+                        echo "=== Vérification des outils ==="
+                        git --version || echo "Git non installé"
+                        docker --version || echo "Docker non installé"
+                        pwd
+                        ls -la
+                    '''
+                }
+            }
+        }
+        
+        // Étape 2: Checkout Git (SIMPLIFIÉ)
         stage('Checkout Git') {
             steps {
+                echo "📥 Récupération du code source..."
+                
+                // Checkout simple sans configuration complexe
                 checkout([
                     $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[
-                        url: "${env.GIT_REPO}",
-                        credentialsId: ''  // Laissez vide si repo public
-                    ]],
+                    branches: [[name: '*/master']],  // VOTRE REPO UTILISE 'master', PAS 'main'
                     extensions: [[
-                        $class: 'CleanBeforeCheckout'
+                        $class: 'CleanCheckout'
+                    ]],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/oussama-mhennaoui/GestionFoyer.git'
                     ]]
                 ])
                 
+                // Obtenir le hash du commit
                 script {
-                    // Récupérer le hash court du commit
                     env.COMMIT_HASH = sh(
                         script: 'git rev-parse --short HEAD',
                         returnStdout: true
                     ).trim()
                     
-                    echo "✅ Checkout réussi - Commit: ${env.COMMIT_HASH}"
+                    env.BRANCH_NAME = sh(
+                        script: 'git rev-parse --abbrev-ref HEAD',
+                        returnStdout: true
+                    ).trim()
+                    
+                    echo "✅ Checkout réussi"
+                    echo "- Branche: ${env.BRANCH_NAME}"
+                    echo "- Commit: ${env.COMMIT_HASH}"
                 }
             }
         }
         
-        // Étape 2: Préparation et test
-        stage('Préparation') {
+        // Étape 3: Analyse du projet
+        stage('Analyse du Projet') {
             steps {
                 script {
-                    // Vérifier la présence des fichiers nécessaires
-                    if (fileExists('pom.xml')) {
-                        echo "📦 Projet Maven détecté"
-                        env.PROJECT_TYPE = 'maven'
-                    } else if (fileExists('package.json')) {
-                        echo "📦 Projet Node.js détecté"
-                        env.PROJECT_TYPE = 'node'
+                    echo "🔍 Analyse de la structure du projet..."
+                    
+                    // Lister tous les fichiers
+                    sh 'find . -type f -name "*" | head -30'
+                    
+                    // Vérifier la présence de fichiers spécifiques
+                    if (fileExists('Dockerfile')) {
+                        echo "✅ Dockerfile trouvé"
+                        sh 'cat Dockerfile'
                     } else {
-                        echo "ℹ️  Type de projet non spécifique"
-                        env.PROJECT_TYPE = 'other'
-                    }
-                    
-                    // Lister les fichiers pour débogage
-                    sh 'ls -la'
-                }
-            }
-        }
-        
-        // Étape 3: Build Docker Image
-        stage('Build Docker Image') {
-            steps {
-                script {
-                    // Vérifier si Dockerfile existe
-                    if (!fileExists('Dockerfile')) {
-                        echo "⚠️  Dockerfile non trouvé, création d'un Dockerfile par défaut..."
+                        echo "⚠️  Dockerfile non trouvé - création d'un Dockerfile basique"
                         
-                        // Créer un Dockerfile minimal selon le type de projet
-                        if (env.PROJECT_TYPE == 'maven') {
-                            writeFile file: 'Dockerfile', text: '''FROM openjdk:11-jre-slim
+                        // Créer un Dockerfile minimal pour Java Spring
+                        writeFile file: 'Dockerfile', text: '''# Dockerfile pour application Java Spring Boot
+FROM openjdk:11-jdk-slim
+
+# Définir le répertoire de travail
 WORKDIR /app
-COPY target/*.jar app.jar
+
+# Copier le fichier de configuration Maven
+COPY pom.xml .
+
+# Copier le code source
+COPY src ./src
+
+# Build l'application (si c'est un projet Maven)
+RUN apt-get update && apt-get install -y maven
+RUN mvn clean package -DskipTests
+
+# Exposer le port
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]'''
-                        } else if (env.PROJECT_TYPE == 'node') {
-                            writeFile file: 'Dockerfile', text: '''FROM node:14-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-EXPOSE 3000
-CMD ["npm", "start"]'''
-                        } else {
-                            writeFile file: 'Dockerfile', text: '''FROM nginx:alpine
-COPY . /usr/share/nginx/html
-EXPOSE 80'''
-                        }
+
+# Commande de démarrage
+ENTRYPOINT ["java", "-jar", "target/*.jar"]'''
                         
-                        echo "📄 Dockerfile créé"
+                        echo "📄 Dockerfile créé avec succès"
                     }
-                    
-                    // Afficher le contenu du Dockerfile
-                    sh 'cat Dockerfile'
-                    
-                    // Définir les tags
-                    def tags = [
-                        "${env.DOCKER_IMAGE}:${env.BUILD_ID}",
-                        "${env.DOCKER_IMAGE}:${env.COMMIT_HASH}",
-                        "${env.DOCKER_IMAGE}:latest"
-                    ]
-                    
-                    // Construire l'image avec plusieurs tags
-                    docker.build("${env.DOCKER_IMAGE}:${env.BUILD_ID}")
-                    
-                    echo "🐳 Image Docker construite avec succès"
-                    echo "📦 Tags: ${tags.join(', ')}"
                 }
             }
         }
         
-        // Étape 4: Push vers Docker Hub
-        stage('Push to Docker Hub') {
+        // Étape 4: Build Docker Image
+        stage('Build Docker') {
             steps {
                 script {
-                    echo "🔐 Connexion à Docker Hub..."
+                    echo "🐳 Construction de l'image Docker..."
                     
-                    // Se connecter à Docker Hub avec vos credentials
+                    // Construire l'image
+                    dockerImage = docker.build(
+                        "${env.DOCKER_IMAGE}:${env.BUILD_NUMBER}",
+                        "--no-cache ."
+                    )
+                    
+                    // Ajouter un tag avec le hash du commit
+                    sh "docker tag ${env.DOCKER_IMAGE}:${env.BUILD_NUMBER} ${env.DOCKER_IMAGE}:${env.COMMIT_HASH}"
+                    
+                    echo "✅ Image Docker construite:"
+                    sh "docker images | grep ${env.DOCKER_IMAGE}"
+                }
+            }
+        }
+        
+        // Étape 5: Push vers Docker Hub
+        stage('Push Docker Hub') {
+            steps {
+                script {
+                    echo "🚀 Poussée vers Docker Hub..."
+                    
+                    // Se connecter à Docker Hub
                     withCredentials([string(credentialsId: env.DOCKERHUB_CREDENTIALS_ID, variable: 'DOCKER_PASSWORD')]) {
                         sh """
-                            docker login -u ouss12045 -p ${DOCKER_PASSWORD}
+                            echo "Connexion à Docker Hub..."
+                            docker login -u ouss12045 -p '${DOCKER_PASSWORD}'
                         """
                     }
                     
-                    // Taguer et pousser l'image
-                    def imageTags = [
-                        "${env.BUILD_ID}",
-                        "${env.COMMIT_HASH}",
-                        "latest"
-                    ]
+                    // Pousser les images
+                    sh """
+                        echo "Poussée de l'image avec tag: ${env.BUILD_NUMBER}"
+                        docker push ${env.DOCKER_IMAGE}:${env.BUILD_NUMBER}
+                        
+                        echo "Poussée de l'image avec tag: ${env.COMMIT_HASH}"
+                        docker push ${env.DOCKER_IMAGE}:${env.COMMIT_HASH}
+                        
+                        # Taguer comme 'latest' si sur branche master
+                        if [ "${env.BRANCH_NAME}" = "master" ]; then
+                            echo "Poussée de l'image avec tag: latest"
+                            docker tag ${env.DOCKER_IMAGE}:${env.BUILD_NUMBER} ${env.DOCKER_IMAGE}:latest
+                            docker push ${env.DOCKER_IMAGE}:latest
+                        fi
+                    """
                     
-                    imageTags.each { tag ->
-                        sh """
-                            docker tag ${env.DOCKER_IMAGE}:${env.BUILD_ID} ${env.DOCKER_IMAGE}:${tag}
-                            docker push ${env.DOCKER_IMAGE}:${tag}
-                        """
-                        echo "✅ Image poussée avec tag: ${tag}"
-                    }
-                    
-                    echo "🚀 Toutes les images ont été poussées vers Docker Hub"
+                    echo "🎉 Images poussées avec succès vers Docker Hub!"
                 }
             }
         }
         
-        // Étape 5: Nettoyage
-        stage('Cleanup') {
+        // Étape 6: Nettoyage
+        stage('Nettoyage') {
             steps {
                 script {
-                    // Supprimer l'image locale pour économiser de l'espace
-                    sh "docker rmi ${env.DOCKER_IMAGE}:${env.BUILD_ID} || true"
+                    echo "🧹 Nettoyage des ressources..."
                     
-                    // Nettoyer les containers arrêtés et images intermédiaires
-                    sh 'docker system prune -f --filter "until=24h"'
+                    // Supprimer les images locales
+                    sh """
+                        docker rmi ${env.DOCKER_IMAGE}:${env.BUILD_NUMBER} || true
+                        docker rmi ${env.DOCKER_IMAGE}:${env.COMMIT_HASH} || true
+                        docker system prune -f
+                    """
                     
-                    echo "🧹 Nettoyage terminé"
+                    echo "✅ Nettoyage terminé"
                 }
             }
         }
@@ -165,44 +189,41 @@ EXPOSE 80'''
     
     post {
         always {
-            echo "📊 Pipeline terminé - Build #${env.BUILD_NUMBER}"
-            
-            // Archivage des logs Docker
-            sh 'docker images | grep ${DOCKER_IMAGE} || true' > docker-images.txt
-            archiveArtifacts artifacts: 'docker-images.txt', fingerprint: true
+            echo "=========================================="
+            echo "📋 RÉSUMÉ DU BUILD #${env.BUILD_NUMBER}"
+            echo "=========================================="
+            echo "Statut: ${currentBuild.currentResult}"
+            echo "Durée: ${currentBuild.durationString}"
+            echo "Commit: ${env.COMMIT_HASH}"
+            echo "Branche: ${env.BRANCH_NAME}"
+            echo "Image: ${env.DOCKER_IMAGE}"
+            echo "=========================================="
         }
         
         success {
-            echo "🎉 SUCCÈS: Pipeline terminé avec succès!"
-            echo "📦 Image disponible sur Docker Hub: ${env.DOCKER_IMAGE}"
-            echo "🏷️  Tags: latest, ${env.BUILD_ID}, ${env.COMMIT_HASH}"
+            echo "🎉 🎉 🎉 BUILD RÉUSSI! 🎉 🎉 🎉"
+            echo "L'image est disponible sur Docker Hub:"
+            echo "👉 https://hub.docker.com/r/ouss12045/gestionfoyer"
             
-            // Vous pouvez ajouter des notifications ici
-            // emailext, slackSend, etc.
+            // Notification optionnelle
+            // emailext to: 'vous@email.com',
+            //     subject: "SUCCÈS: Build ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+            //     body: "L'image ${env.DOCKER_IMAGE} a été construite et poussée avec succès."
         }
         
         failure {
-            echo "❌ ÉCHEC: Pipeline en échec"
-            echo "🔍 Consultez les logs pour plus de détails"
+            echo "❌ ❌ ❌ BUILD ÉCHOUÉ ❌ ❌ ❌"
+            echo "Consultez les logs pour plus de détails."
             
-            // Envoyer une notification d'échec
-            // emailext subject: "Échec du build ${env.JOB_NAME}",
-            //          body: "Le build #${env.BUILD_NUMBER} a échoué.\nURL: ${env.BUILD_URL}"
-        }
-        
-        unstable {
-            echo "⚠️  Pipeline instable"
+            // Notification d'échec
+            // emailext to: 'vous@email.com',
+            //     subject: "ÉCHEC: Build ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+            //     body: "Le build a échoué. URL: ${env.BUILD_URL}"
         }
     }
     
     options {
         timeout(time: 30, unit: 'MINUTES')
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
-    }
-    
-    triggers {
-        // Déclenchement automatique sur push GitHub
-        pollSCM('H/5 * * * *')  // Vérifie toutes les 5 minutes
+        buildDiscarder(logRotator(numToKeepStr: '5'))
     }
 }

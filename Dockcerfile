@@ -5,7 +5,7 @@ FROM openjdk:11-jre-slim
 ENV SPRING_PROFILES_ACTIVE=prod
 
 # Répertoire de travail
-WORKDIR /src
+WORKDIR /app
 
 # Copier le JAR (à adapter selon votre build)
 COPY target/*.jar app.jar
