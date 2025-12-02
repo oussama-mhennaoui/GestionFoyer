@@ -1,15 +1,12 @@
-// SUPPRIMEZ L'ESPACE AVANT "pipeline" !
-pipeline {  // <-- Doit commencer à la première colonne
+pipeline {
     agent any
     
     triggers {
-        // Déclenchement automatique par webhook GitHub
         githubPush()
     }
     
     options {
         timeout(time: 30, unit: 'MINUTES')
-        buildDiscarder(logRotator(numToKeepStr: '5'))
     }
     
     stages {
@@ -17,45 +14,32 @@ pipeline {  // <-- Doit commencer à la première colonne
             steps {
                 checkout scm
                 sh 'echo "✅ Code récupéré depuis GitHub"'
-                sh 'ls -la'
+            }
+        }
+        
+        stage('🔨 Build Application') {
+            steps {
+                script {
+                    echo "🏗️ Construction de l'application..."
+                    // Pour Spring Boot
+                    sh 'mvn clean package'
+                    // OU pour Node.js: sh 'npm install && npm run build'
+                }
             }
         }
         
         stage('🧪 Tests') {
             steps {
-                sh 'echo "🚀 Exécution des tests..."'
+                sh 'echo "🧪 Exécution des tests..."'
+                sh 'mvn test'
+                // OU: sh 'npm test'
             }
         }
         
-        stage('🐳 Build Docker') {
+        stage('📦 Package') {
             steps {
-                script {
-                    echo "🏗️ Construction de l'image Docker..."
-                    sh 'docker build -t votre-app:latest .'
-                }
-            }
-        }
-        
-        stage('📦 Push to Docker Hub') {
-            environment {
-                DOCKERHUB_TOKEN = credentials('docker-hub-token')  // <-- Vérifiez l'ID
-            }
-            steps {
-                script {
-                    echo "🚀 Push vers Docker Hub..."
-                    sh '''
-                        echo $DOCKERHUB_TOKEN | docker login -u ouss12045 --password-stdin
-                        docker tag votre-app:latest ouss12045/votre-app:latest
-                        docker push ouss12045/votre-app:latest
-                        docker logout
-                    '''
-                }
-            }
-        }
-        
-        stage('🚀 Déploiement') {
-            steps {
-                echo "🎯 Déploiement..."
+                sh 'echo "📦 Création du package..."'
+                sh 'ls -la target/'  // Pour voir le JAR généré
             }
         }
     }
@@ -68,7 +52,6 @@ pipeline {  // <-- Doit commencer à la première colonne
             echo "❌ Pipeline échoué"
         }
         always {
-            sh 'docker system prune -f || true'
             echo "🧹 Nettoyage terminé"
         }
     }
