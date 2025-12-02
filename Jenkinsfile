@@ -1,4 +1,5 @@
-pipeline {
+// SUPPRIMEZ L'ESPACE AVANT "pipeline" !
+pipeline {  // <-- Doit commencer à la première colonne
     agent any
     
     triggers {
@@ -23,8 +24,6 @@ pipeline {
         stage('🧪 Tests') {
             steps {
                 sh 'echo "🚀 Exécution des tests..."'
-                // Ajoutez vos commandes de test ici
-                // Ex: mvn test, npm test, pytest, etc.
             }
         }
         
@@ -32,7 +31,6 @@ pipeline {
             steps {
                 script {
                     echo "🏗️ Construction de l'image Docker..."
-                    // Assurez-vous d'avoir un Dockerfile dans votre repo
                     sh 'docker build -t votre-app:latest .'
                 }
             }
@@ -40,7 +38,7 @@ pipeline {
         
         stage('📦 Push to Docker Hub') {
             environment {
-                DOCKERHUB_TOKEN = credentials('docker-hub-credentials')
+                DOCKERHUB_TOKEN = credentials('docker-hub-token')  // <-- Vérifiez l'ID
             }
             steps {
                 script {
@@ -58,8 +56,6 @@ pipeline {
         stage('🚀 Déploiement') {
             steps {
                 echo "🎯 Déploiement..."
-                // Ajoutez vos étapes de déploiement ici
-                // Ex: kubectl apply, docker-compose up, etc.
             }
         }
     }
@@ -67,11 +63,9 @@ pipeline {
     post {
         success {
             echo "✅ Pipeline terminé avec succès !"
-            // Notification Slack/Email/etc.
         }
         failure {
             echo "❌ Pipeline échoué"
-            // Notification d'erreur
         }
         always {
             sh 'docker system prune -f || true'
