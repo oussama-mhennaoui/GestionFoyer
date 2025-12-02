@@ -5,7 +5,7 @@ pipeline {
         // Variables Docker
         DOCKER_REGISTRY = 'docker.io'
         DOCKER_HUB_USERNAME = 'ouss12045'
-        DOCKER_IMAGE_NAME = 'gestion-foyer-app'
+        DOCKER_IMAGE_NAME = 'gestionfoyer'
         DOCKER_IMAGE_TAG = "${env.BUILD_NUMBER}"
         
         // Construire le nom complet de l'image
