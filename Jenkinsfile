@@ -1,22 +1,15 @@
 pipeline {
     agent any
     
-    environment {
-        DOCKERHUB_CREDENTIALS_ID = 'docker-hub-credentials'
-        DOCKER_IMAGE = 'ouss12045/gestionfoyer'
-        DOCKER_TAG = "${env.BUILD_NUMBER}"
+    triggers {
+        // Vérifie GitHub toutes les 1 minutes
+        pollSCM('H/1 * * * *')
     }
     
     stages {
-        
-        stage('Clean Workspace') {
+        stage('📥 Get Code from GitHub') {
             steps {
-                cleanWs()
-            }
-        }
-        
-        stage('Checkout Git') {
-            steps {
+                echo '🔄 Checking for new commits on GitHub...'
                 checkout([
                     $class: 'GitSCM',
                     branches: [[name: '*/master']],
@@ -24,99 +17,62 @@ pipeline {
                         url: 'https://github.com/oussama-mhennaoui/GestionFoyer.git'
                     ]]
                 ])
-                
-                script {
-                    env.COMMIT_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-                    echo "✅ Code récupéré - Commit: ${env.COMMIT_HASH}"
-                }
+                sh 'echo "✅ Latest commit: $(git log --oneline -1)"'
             }
         }
         
-        stage('Build Maven') {
+        stage('⚙️ Build Java App') {
             steps {
                 sh '''
-                    echo "=== BUILD MAVEN ==="
-                    mvn clean package -DskipTests -B
-                    
-                    echo "=== VÉRIFICATION ==="
-                    ls -la target/*.jar || echo "Aucun JAR trouvé"
+                    echo "📦 Building Spring Boot application..."
+                    mvn clean package -DskipTests
+                    echo "✅ JAR created: $(ls -lh target/*.jar)"
                 '''
             }
         }
         
-        stage('Create Dockerfile') {
+        stage('🐳 Create Docker Image') {
             steps {
                 sh '''
-                    echo "=== CRÉATION DOCKERFILE ==="
+                    echo "📄 Creating Dockerfile..."
                     
-                    # Créer Dockerfile SIMPLE
-                    cat > Dockerfile << EOF
-# Dockerfile GestionFoyer
+                    # Simple Dockerfile
+                    cat > Dockerfile << 'END'
 FROM eclipse-temurin:11-jre
-
 WORKDIR /app
-
-# Copier le JAR
 COPY target/*.jar app.jar
-
 EXPOSE 8080
-
 ENTRYPOINT ["java", "-jar", "app.jar"]
-EOF
+END
                     
-                    echo "=== FICHIERS CRÉÉS ==="
-                    ls -la Dockerfile
-                    echo ""
-                    echo "=== DOCKERFILE CONTENT ==="
-                    cat Dockerfile
+                    echo "🔨 Building Docker image..."
+                    docker build -t ouss12045/gestionfoyer:$BUILD_NUMBER .
+                    docker tag ouss12045/gestionfoyer:$BUILD_NUMBER ouss12045/gestionfoyer:latest
+                    
+                    echo "✅ Images ready:"
+                    docker images | grep ouss12045/gestionfoyer
                 '''
             }
         }
         
-        stage('Build Docker Image') {
+        stage('🚀 Push to Docker Hub') {
             steps {
                 script {
-                    echo "🐳 Construction image Docker..."
+                    echo "📤 Pushing to Docker Hub..."
+                    
+                    // ⚠️ REMPLACEZ CE TOKEN PAR LE VÔTRE ! ⚠️
+                    def DOCKER_TOKEN = 'dckr_pat__cN4-iLRHlaNwdO_QwIvIDJr9qk'
                     
                     sh """
-                        # Build Docker
-                        docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} .
-                        
-                        echo "✅ Image construite"
-                        docker images | grep ${env.DOCKER_IMAGE} || echo "Image non trouvée"
-                    """
-                }
-            }
-        }
-        
-        stage('Tag Images') {
-            steps {
-                sh """
-                    # Tag avec commit hash
-                    docker tag ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} ${env.DOCKER_IMAGE}:${env.COMMIT_HASH}
-                    
-                    # Tag latest
-                    docker tag ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} ${env.DOCKER_IMAGE}:latest
-                    
-                    echo "✅ Images taggées"
-                    docker images | grep ${env.DOCKER_IMAGE} || echo "Aucune image trouvée"
-                """
-            }
-        }
-        
-        stage('Push to Docker Hub') {
-            steps {
-                withCredentials([string(credentialsId: env.DOCKERHUB_CREDENTIALS_ID, variable: 'DOCKER_PASSWORD')]) {
-                    sh """
-                        # Login Docker Hub
-                        echo "\${DOCKER_PASSWORD}" | docker login -u ouss12045 --password-stdin
+                        # Login to Docker Hub with token
+                        echo "${DOCKER_TOKEN}" | docker login -u ouss12045 --password-stdin
                         
                         # Push images
-                        docker push ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}
-                        docker push ${env.DOCKER_IMAGE}:${env.COMMIT_HASH}
-                        docker push ${env.DOCKER_IMAGE}:latest
+                        docker push ouss12045/gestionfoyer:$BUILD_NUMBER
+                        docker push ouss12045/gestionfoyer:latest
                         
-                        echo "🎉 Images poussées vers Docker Hub!"
+                        echo "🎉 Images pushed successfully!"
+                        echo "👉 Check: https://hub.docker.com/r/ouss12045/gestionfoyer"
                     """
                 }
             }
@@ -125,18 +81,45 @@ EOF
     
     post {
         always {
-            echo "📊 Build #${env.BUILD_NUMBER} - ${currentBuild.currentResult}"
+            echo "📊 Build #$BUILD_NUMBER completed: $currentBuild.currentResult"
+            sh 'docker system prune -f 2>/dev/null || true'
         }
         
         success {
-            echo "🎉 SUCCÈS! Pipeline CI/CD terminé."
-            echo "Image Docker: ${env.DOCKER_IMAGE}"
-            echo "Tags: ${env.DOCKER_TAG}, ${env.COMMIT_HASH}, latest"
-            echo "Disponible sur: https://hub.docker.com/r/ouss12045/gestionfoyer"
+            echo '''
+            🎉🎉🎉 AUTOMATED CI/CD SUCCESS! 🎉🎉🎉
+            
+            ✅ What happened:
+              1. GitHub repo checked ✅
+              2. Java app built ✅
+              3. Docker image created ✅
+              4. Image pushed to Docker Hub ✅
+            
+            🔗 Your image is now available at:
+              https://hub.docker.com/r/ouss12045/gestionfoyer
+            
+            🏷️ Tags:
+              • ouss12045/gestionfoyer:$BUILD_NUMBER
+              • ouss12045/gestionfoyer:latest
+            
+            ⚡ Next commit to GitHub will trigger a new build automatically!
+            '''
         }
         
         failure {
-            echo "❌ ÉCHEC - Voir les logs pour plus de détails"
+            echo '''
+            ❌ Build failed
+            
+            🔧 Quick fixes:
+              1. Check Docker Hub token in the script
+              2. Test manually: docker login -u ouss12045
+              3. Check internet connection
+              
+            📝 Manual test commands:
+              cd /var/lib/jenkins/workspace/Webhook
+              mvn clean package
+              docker build .
+            '''
         }
     }
 }
