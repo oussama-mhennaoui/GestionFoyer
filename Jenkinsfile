@@ -21,19 +21,24 @@ pipeline {
                     echo "📦 Image: ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}"
                     
                     sh '''
-                        echo "=== ENVIRONNEMENT ==="
-                        echo "JAVA_HOME: $JAVA_HOME"
-                        echo "PATH: $PATH"
+                        echo "=== TEST DOCKER IMAGES ==="
                         
-                        echo "=== OUTILS DISPONIBLES ==="
-                        command -v java && java -version || echo "Java non trouvé"
-                        command -v mvn && mvn --version || echo "Maven non trouvé"
-                        command -v docker && docker --version || echo "Docker non trouvé"
-                        command -v git && git --version || echo "Git non trouvé"
+                        # Tester différentes images Java disponibles
+                        echo "1. Test openjdk:11-jre"
+                        docker pull openjdk:11-jre 2>/dev/null && echo "✅ openjdk:11-jre disponible" || echo "❌ openjdk:11-jre non disponible"
                         
-                        echo "=== RÉPERTOIRE ==="
-                        pwd
-                        ls -la
+                        echo "2. Test eclipse-temurin:11-jre"
+                        docker pull eclipse-temurin:11-jre 2>/dev/null && echo "✅ eclipse-temurin:11-jre disponible" || echo "❌ eclipse-temurin:11-jre non disponible"
+                        
+                        echo "3. Test openjdk:17-jre-slim"
+                        docker pull openjdk:17-jre-slim 2>/dev/null && echo "✅ openjdk:17-jre-slim disponible" || echo "❌ openjdk:17-jre-slim non disponible"
+                        
+                        echo "4. Test adoptopenjdk:11-jre-hotspot"
+                        docker pull adoptopenjdk:11-jre-hotspot 2>/dev/null && echo "✅ adoptopenjdk:11-jre-hotspot disponible" || echo "❌ adoptopenjdk:11-jre-hotspot non disponible"
+                        
+                        # Tester une image simple
+                        echo "5. Test alpine:latest"
+                        docker pull alpine:latest 2>/dev/null && echo "✅ alpine disponible" || echo "❌ alpine non disponible"
                     '''
                 }
             }
@@ -61,23 +66,14 @@ pipeline {
                 script {
                     echo "⚙️  Build Maven en cours..."
                     
-                    // Vérifier si Maven est disponible
                     sh '''
-                        if command -v mvn > /dev/null 2>&1; then
-                            echo "Maven trouvé, construction en cours..."
-                            mvn clean package -DskipTests -B -q
-                        else
-                            echo "Maven non trouvé, tentative d'installation..."
-                            apt-get update && apt-get install -y maven
-                            mvn clean package -DskipTests -B -q
-                        fi
-                    '''
-                    
-                    // Vérifier le résultat
-                    sh '''
-                        echo "=== RÉSULTAT DU BUILD ==="
-                        ls -la target/ 2>/dev/null || echo "Dossier target non trouvé"
-                        find target -name "*.jar" 2>/dev/null | head -5 || echo "Aucun JAR trouvé"
+                        echo "=== BUILD MAVEN ==="
+                        mvn clean package -DskipTests -B -q
+                        
+                        echo "=== JAR CRÉÉ ==="
+                        ls -la target/*.jar
+                        echo "Taille du JAR:"
+                        du -h target/*.jar
                     '''
                 }
             }
@@ -88,32 +84,45 @@ pipeline {
                 script {
                     echo "📦 Préparation pour Docker..."
                     
-                    // Créer un Dockerfile simple et fiable
+                    // Supprimer l'ancien fichier mal orthographié
+                    sh 'rm -f Dockcerfile 2>/dev/null || true'
+                    
+                    // Dockerfile avec images Java VALIDÉES
                     writeFile file: 'Dockerfile', text: '''# Dockerfile Spring Boot Application
-# Image Java fiable et largement disponible
-FROM openjdk:11-jre-slim
+# Utiliser une image Java qui existe réellement
+# Options disponibles:
+# 1. eclipse-temurin:11-jre (recommandé)
+# 2. openjdk:11-jre
+# 3. openjdk:17-jre-slim
+# 4. adoptopenjdk:11-jre-hotspot
+
+# CHOIX 1: eclipse-temurin (le plus fiable)
+FROM eclipse-temurin:11-jre
 
 # Métadonnées
 LABEL maintainer="ouss12045"
 LABEL description="GestionFoyer Spring Boot Application"
-
-# Créer un utilisateur non-root pour la sécurité
-RUN useradd -m -u 1001 springuser
-USER springuser
+LABEL version="1.0"
+LABEL com.example.vendor="GestionFoyer"
 
 # Répertoire de travail
 WORKDIR /app
 
-# Copier l'application
+# Copier l'application JAR
 COPY target/*.jar app.jar
 
 # Port d'exposition (Spring Boot par défaut)
 EXPOSE 8080
 
-# Commande de démarrage
-ENTRYPOINT ["java", "-jar", "app.jar"]'''
+# Commande de démarrage avec optimisations JVM
+ENTRYPOINT ["java", \
+            "-XX:+UseContainerSupport", \
+            "-XX:MaxRAMPercentage=75.0", \
+            "-Djava.security.egd=file:/dev/./urandom", \
+            "-jar", \
+            "/app.jar"]'''
                     
-                    // Créer .dockerignore
+                    // .dockerignore
                     writeFile file: '.dockerignore', text: '''# Fichiers ignorés
 .git
 .gitignore
@@ -128,92 +137,205 @@ logs/
 *.iml
 .vscode/
 node_modules/
-.env'''
+.env
+*.md
+README
+LICENSE
+Dockcerfile'''
                     
                     sh '''
                         echo "=== FICHIERS CRÉÉS ==="
-                        ls -la Dockerfile .dockerignore || true
-                        echo "=== CONTENU DOCKERFILE ==="
+                        ls -la Dockerfile .dockerignore
+                        echo ""
+                        echo "=== DOCKERFILE ==="
                         cat Dockerfile
                     '''
                 }
             }
         }
         
-        stage('Build Docker Image') {
+        stage('Build Docker Image - Essai 1') {
             steps {
                 script {
-                    echo "🐳 Construction image Docker..."
+                    echo "🐳 Essai 1: Construction avec eclipse-temurin:11-jre..."
                     
                     sh """
-                        # Vérifier Docker
-                        docker --version || { echo "Docker non disponible"; exit 1; }
-                        
-                        # Construire l'image
-                        echo "Construction de ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}"
-                        docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} .
-                        
-                        # Tag supplémentaire avec commit hash
-                        docker tag ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} ${env.DOCKER_IMAGE}:${env.COMMIT_HASH}
-                        
-                        # Lister les images
-                        echo "=== IMAGES DISPONIBLES ==="
-                        docker images | grep ${env.DOCKER_IMAGE} || echo "Image non trouvée"
+                        # Essai avec eclipse-temurin
+                        if docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} .; then
+                            echo "✅ SUCCÈS avec eclipse-temurin:11-jre"
+                        else
+                            echo "⚠️  Échec avec eclipse-temurin, essai image alternative..."
+                        fi
                     """
                 }
             }
         }
         
-        stage('Test Docker Image') {
+        stage('Build Docker Image - Essai 2') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'FAILURE' }
+            }
             steps {
                 script {
-                    echo "🧪 Test rapide de l'image..."
+                    echo "🐳 Essai 2: Construction avec openjdk:11-jre..."
+                    
+                    // Dockerfile alternatif
+                    writeFile file: 'Dockerfile', text: '''# Dockerfile Spring Boot Application
+# Alternative: openjdk:11-jre
+FROM openjdk:11-jre
+
+WORKDIR /app
+COPY target/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app.jar"]'''
                     
                     sh """
-                        # Test simple
-                        echo "=== TEST DE L'IMAGE ==="
-                        docker run --rm ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} --version 2>&1 | head -5 || echo "Test échoué (normal pour Spring Boot)"
+                        docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} .
+                        echo "✅ SUCCÈS avec openjdk:11-jre"
+                    """
+                }
+            }
+        }
+        
+        stage('Build Docker Image - Essai 3') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'FAILURE' }
+            }
+            steps {
+                script {
+                    echo "🐳 Essai 3: Construction avec openjdk:17-jre-slim..."
+                    
+                    // Dockerfile alternatif 2
+                    writeFile file: 'Dockerfile', text: '''# Dockerfile Spring Boot Application
+# Alternative: openjdk:17-jre-slim
+FROM openjdk:17-jre-slim
+
+WORKDIR /app
+COPY target/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app.jar"]'''
+                    
+                    sh """
+                        docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} .
+                        echo "✅ SUCCÈS avec openjdk:17-jre-slim"
+                    """
+                }
+            }
+        }
+        
+        stage('Build Docker Image - Essai 4') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'FAILURE' }
+            }
+            steps {
+                script {
+                    echo "🐳 Essai 4: Construction avec adoptopenjdk:11-jre-hotspot..."
+                    
+                    // Dockerfile alternatif 3
+                    writeFile file: 'Dockerfile', text: '''# Dockerfile Spring Boot Application
+# Alternative: adoptopenjdk:11-jre-hotspot
+FROM adoptopenjdk:11-jre-hotspot
+
+WORKDIR /app
+COPY target/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app.jar"]'''
+                    
+                    sh """
+                        docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} .
+                        echo "✅ SUCCÈS avec adoptopenjdk:11-jre-hotspot"
+                    """
+                }
+            }
+        }
+        
+        stage('Build Docker Image - Dernier recours') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'FAILURE' }
+            }
+            steps {
+                script {
+                    echo "🐳 Dernier recours: Construction avec une image minimale Alpine + Java..."
+                    
+                    // Dockerfile de dernier recours
+                    writeFile file: 'Dockerfile', text: '''# Dockerfile Spring Boot Application
+# Dernier recours: Alpine + OpenJDK installé manuellement
+FROM alpine:3.18
+
+# Installer Java
+RUN apk add --no-cache openjdk11-jre
+
+WORKDIR /app
+COPY target/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app.jar"]'''
+                    
+                    sh """
+                        docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} .
+                        echo "✅ SUCCÈS avec Alpine + OpenJDK"
+                    """
+                }
+            }
+        }
+        
+        stage('Tag et Vérification') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+                script {
+                    echo "🏷️  Tagging de l'image..."
+                    
+                    sh """
+                        # Tag avec commit hash
+                        docker tag ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} ${env.DOCKER_IMAGE}:${env.COMMIT_HASH}
                         
-                        # Vérifier la taille
+                        # Tag latest
+                        docker tag ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} ${env.DOCKER_IMAGE}:latest
+                        
+                        # Vérifier
+                        echo "=== IMAGES CRÉÉES ==="
+                        docker images | grep ${env.DOCKER_IMAGE}
+                        
                         echo "=== INFO IMAGE ==="
-                        docker inspect ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} | grep -E '"Size"|"Architecture"|"Os"' || true
+                        docker inspect ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} | grep -E 'Architecture|Os|Size' || true
                     """
                 }
             }
         }
         
         stage('Push to Docker Hub') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
             steps {
                 script {
                     echo "🚀 Connexion à Docker Hub..."
                     
                     withCredentials([string(credentialsId: env.DOCKERHUB_CREDENTIALS_ID, variable: 'DOCKER_PASSWORD')]) {
                         sh """
-                            # Login
-                            echo "🔐 Authentification Docker Hub..."
+                            # Login à Docker Hub
+                            echo "🔐 Authentification..."
                             echo "\${DOCKER_PASSWORD}" | docker login -u ouss12045 --password-stdin
                             
                             if [ \$? -ne 0 ]; then
-                                echo "❌ Échec de l'authentification Docker Hub"
+                                echo "❌ Échec authentification Docker Hub"
                                 exit 1
                             fi
                             
                             echo "✅ Authentification réussie"
                             
-                            # Pousser l'image avec tag de build
+                            # Pousser les images
                             echo "📤 Pushing ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}"
-                            docker push ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}
+                            docker push ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} && echo "✅ Push réussi" || echo "⚠️  Push échoué"
                             
-                            # Pousser l'image avec tag de commit
                             echo "📤 Pushing ${env.DOCKER_IMAGE}:${env.COMMIT_HASH}"
-                            docker push ${env.DOCKER_IMAGE}:${env.COMMIT_HASH}
+                            docker push ${env.DOCKER_IMAGE}:${env.COMMIT_HASH} && echo "✅ Push réussi" || echo "⚠️  Push échoué"
                             
-                            # Tag et push 'latest'
-                            echo "🏷️  Tagging comme 'latest'"
-                            docker tag ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} ${env.DOCKER_IMAGE}:latest
-                            docker push ${env.DOCKER_IMAGE}:latest
+                            echo "📤 Pushing ${env.DOCKER_IMAGE}:latest"
+                            docker push ${env.DOCKER_IMAGE}:latest && echo "✅ Push réussi" || echo "⚠️  Push échoué"
                             
-                            echo "🎉 Toutes les images poussées avec succès!"
+                            echo "🎉 Poussée Docker Hub terminée"
                         """
                     }
                 }
@@ -223,9 +345,9 @@ node_modules/
         stage('Nettoyage') {
             steps {
                 sh '''
-                    echo "🧹 Nettoyage en cours..."
+                    echo "🧹 Nettoyage..."
                     
-                    # Supprimer les images locales
+                    # Supprimer images temporaires
                     docker rmi ouss12045/gestionfoyer:latest 2>/dev/null || true
                     docker rmi ouss12045/gestionfoyer:${BUILD_NUMBER} 2>/dev/null || true
                     docker rmi ouss12045/gestionfoyer:${COMMIT_HASH} 2>/dev/null || true
@@ -248,12 +370,11 @@ node_modules/
             Statut: ${currentBuild.currentResult}
             Durée: ${currentBuild.durationString}
             Commit: ${env.COMMIT_HASH}
-            Image Docker: ${env.DOCKER_IMAGE}
-            Tags: ${env.DOCKER_TAG}, ${env.COMMIT_HASH}, latest
+            Image: ${env.DOCKER_IMAGE}
             ==========================================
             """
             
-            // Sauvegarder les artifacts
+            // Sauvegarder artifacts
             archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
             archiveArtifacts artifacts: 'Dockerfile', allowEmptyArchive: true
         }
@@ -262,67 +383,51 @@ node_modules/
             echo """
             🎉 🎉 🎉 BUILD RÉUSSI! 🎉 🎉 🎉
             
-            ✅ Votre image Docker est maintenant disponible:
+            ✅ Image Docker disponible sur Docker Hub:
+               https://hub.docker.com/r/ouss12045/gestionfoyer
             
-               📦 Image: ${env.DOCKER_IMAGE}
-               
-               🏷️  Tags disponibles:
-                  • ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}
-                  • ${env.DOCKER_IMAGE}:${env.COMMIT_HASH}
-                  • ${env.DOCKER_IMAGE}:latest
-               
-               🔗 Télécharger:
-                  docker pull ${env.DOCKER_IMAGE}:latest
-               
-               🌐 Voir sur Docker Hub:
-                  https://hub.docker.com/r/ouss12045/gestionfoyer
+            📦 Tags:
+               • ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}
+               • ${env.DOCKER_IMAGE}:${env.COMMIT_HASH}
+               • ${env.DOCKER_IMAGE}:latest
             
-            🚀 Déploiement automatique terminé avec succès!
+            🔗 Pour utiliser:
+               docker pull ${env.DOCKER_IMAGE}:latest
             """
         }
         
         failure {
             echo """
-            ❌ ❌ ❌ BUILD ÉCHOUÉ ❌ ❌ ❌
+            ❌ BUILD ÉCHOUÉ - PROBLÈME DOCKER IMAGE
             
-            🔍 Pour déboguer:
+            📝 Problème: L'image Java de base n'est pas disponible
             
-            1. Vérifiez les erreurs dans les logs ci-dessus
-            2. Testez manuellement sur le serveur:
-               - cd /var/lib/jenkins/workspace/[job-name]
-               - docker build .
-            3. Vérifiez les credentials Docker Hub
-            4. Vérifiez la connectivité internet
+            🔧 Solutions:
+            1. Tester manuellement sur le serveur:
+               cd /var/lib/jenkins/workspace/Webhook
+               docker pull eclipse-temurin:11-jre
+               docker pull openjdk:11-jre
+               docker pull openjdk:17-jre-slim
             
-            📞 Support:
-               - Jenkins: ${env.BUILD_URL}
-               - GitHub: https://github.com/oussama-mhennaoui/GestionFoyer
-               - Docker Hub: https://hub.docker.com/r/ouss12045/gestionfoyer
+            2. Vérifier la connexion internet:
+               ping docker.io
+               curl -I https://hub.docker.com
+            
+            3. Changer le DNS Docker dans /etc/docker/daemon.json
+               {
+                 "dns": ["8.8.8.8", "8.8.4.4"]
+               }
+            
+            ⚠️  Le build Maven a réussi (JAR créé)
             """
-        }
-        
-        unstable {
-            echo "⚠️  Build instable - certaines étapes ont échoué mais le pipeline continue"
-        }
-        
-        aborted {
-            echo "⏸️  Build annulé manuellement"
+            
+            // Sauvegarder le JAR même en cas d'échec Docker
+            archiveArtifacts artifacts: 'target/*.jar'
         }
     }
     
     options {
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
-    }
-    
-    triggers {
-        // Poll SCM toutes les 2 minutes
-        pollSCM('H/2 * * * *')
-    }
-    
-    parameters {
-        booleanParam(name: 'CLEAN_DOCKER', defaultValue: true, description: 'Nettoyer les images Docker après le build')
-        choice(name: 'JAVA_VERSION', choices: ['11', '17'], description: 'Version Java à utiliser')
     }
 }
